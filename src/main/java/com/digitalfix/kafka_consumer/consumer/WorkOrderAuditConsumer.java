@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import com.digitalfix.kafka_consumer.dto.WorkOrderAuditEvent;
 import com.digitalfix.kafka_consumer.service.KafkaProcessingService;
+import com.digitalfix.kafka_consumer.service.ProcessedEventStore;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -19,12 +20,15 @@ public class WorkOrderAuditConsumer {
             LoggerFactory.getLogger(WorkOrderAuditConsumer.class);
 
     private final KafkaProcessingService processingService;
+    private final ProcessedEventStore processedEventStore;
     private final ObjectMapper objectMapper;
 
     public WorkOrderAuditConsumer(
             KafkaProcessingService processingService,
+            ProcessedEventStore processedEventStore,
             ObjectMapper objectMapper) {
         this.processingService = processingService;
+        this.processedEventStore = processedEventStore;
         this.objectMapper = objectMapper;
     }
 
@@ -49,7 +53,29 @@ public class WorkOrderAuditConsumer {
                         WorkOrderAuditEvent.class
                 );
 
+        if (audit.eventId() == null || audit.eventId().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Evento de auditoría sin eventId"
+            );
+        }
+
+        if (processedEventStore.isProcessed(audit.eventId())) {
+            log.info(
+                    "Auditoría duplicada ignorada: eventId={}",
+                    audit.eventId()
+            );
+            acknowledgment.acknowledge();
+            return;
+        }
+
         processingService.processAuditEvent(audit);
+
+        processedEventStore.markProcessed(
+                audit.eventId(),
+                record.topic(),
+                audit.orderId(),
+                audit.accion()
+        );
 
         acknowledgment.acknowledge();
 

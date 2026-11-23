@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import com.digitalfix.kafka_consumer.dto.WorkOrderKafkaEvent;
 import com.digitalfix.kafka_consumer.service.KafkaProcessingService;
+import com.digitalfix.kafka_consumer.service.ProcessedEventStore;
 
 import tools.jackson.databind.ObjectMapper;
 
@@ -19,12 +20,15 @@ public class WorkOrderEventConsumer {
             LoggerFactory.getLogger(WorkOrderEventConsumer.class);
 
     private final KafkaProcessingService processingService;
+    private final ProcessedEventStore processedEventStore;
     private final ObjectMapper objectMapper;
 
     public WorkOrderEventConsumer(
             KafkaProcessingService processingService,
+            ProcessedEventStore processedEventStore,
             ObjectMapper objectMapper) {
         this.processingService = processingService;
+        this.processedEventStore = processedEventStore;
         this.objectMapper = objectMapper;
     }
 
@@ -49,7 +53,29 @@ public class WorkOrderEventConsumer {
                         WorkOrderKafkaEvent.class
                 );
 
+        if (event.eventId() == null || event.eventId().isBlank()) {
+            throw new IllegalArgumentException(
+                    "Evento de orden sin eventId"
+            );
+        }
+
+        if (processedEventStore.isProcessed(event.eventId())) {
+            log.info(
+                    "Evento duplicado ignorado: eventId={}",
+                    event.eventId()
+            );
+            acknowledgment.acknowledge();
+            return;
+        }
+
         processingService.processWorkOrderEvent(event);
+
+        processedEventStore.markProcessed(
+                event.eventId(),
+                record.topic(),
+                event.orderId(),
+                event.tipo()
+        );
 
         acknowledgment.acknowledge();
 

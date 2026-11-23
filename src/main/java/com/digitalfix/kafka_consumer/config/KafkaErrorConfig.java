@@ -59,9 +59,16 @@ public class KafkaErrorConfig {
     public DefaultErrorHandler kafkaErrorHandler(
             KafkaTemplate<String, String> dltKafkaTemplate) {
 
+        // Spring Kafka 4 usa por defecto el sufijo "-dlt". El proyecto usa
+        // "<topico>.DLT", asi que se explicita el destino para ambos topicos.
         DeadLetterPublishingRecoverer recoverer =
                 new DeadLetterPublishingRecoverer(
-                        dltKafkaTemplate
+                        dltKafkaTemplate,
+                        (record, ex) ->
+                                new org.apache.kafka.common.TopicPartition(
+                                        record.topic() + ".DLT",
+                                        record.partition()
+                                )
                 );
 
         // Dos reintentos adicionales, separados por 2 segundos.
@@ -72,6 +79,11 @@ public class KafkaErrorConfig {
 
         // Si falla la publicación en DLT, no marcar como recuperado.
         errorHandler.setResetStateOnRecoveryFailure(true);
+
+        // Confirmar el offset del registro enviado a DLT para que no se
+        // reprocese al reiniciar el consumidor.
+        errorHandler.setCommitRecovered(true);
+        errorHandler.setAckAfterHandle(true);
 
         return errorHandler;
     }
